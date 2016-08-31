@@ -1,5 +1,6 @@
 import random
 import time
+from collections import OrderedDict
 from tabulate import tabulate
 
 
@@ -7,7 +8,11 @@ class Card:
     def __init__(self, value, rank, suit):
         self.value = value
         self.rank = rank
+        self.suit = suit
         self.title = rank + ' ' + suit
+
+    def __str__(self):
+        return '{} {}'.format(self.rank, self.suit)
 
 
 class Deck:
@@ -16,13 +21,13 @@ class Deck:
     VALUES = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11]
     NUM_DECKS = 6
 
-    @staticmethod
-    def new_deck():
+    @classmethod
+    def new_deck(cls):
         """Create one shuffled deck per game, pop off cards as needed"""
         deck = []
         for suit in Deck.SUITS:
-            for i in range(len(Deck.VALUES)):
-                deck.append(Card(Deck.VALUES[i], Deck.RANKS[i], suit))
+            for value, rank in zip(Deck.VALUES, Deck.RANKS):
+                deck.append(Card(value, rank, suit))
         deck *= Deck.NUM_DECKS
         random.shuffle(deck)
         return deck
@@ -119,7 +124,7 @@ class Hand:
         time.sleep(0.5)
         print()
         for i, card in enumerate(self.cards):
-            print('Card', (i + 1), ':', card.title)
+            print('Card {}: {}'.format((i+1), card))
         print('-------------')
         print('Total:', self.total)
         if self.bust:
@@ -175,7 +180,7 @@ class GameState:
             if player.change_bet:
                 player.bet = 0
                 print(player.name)
-                print('Place your bet (Min. $' + str(Game.min_bet) + '/ Max. $' + str(player.bankroll) + '):')
+                print('Place your bet (Min. ${!s} / Max. ${!s}):'.format(Game.min_bet, player.bankroll))
                 while not player.bet >= Game.min_bet and player.bet <= player.bankroll:
                     bet = float(input('>>> $'))
                     if bet < Game.min_bet:
@@ -257,10 +262,10 @@ class GameState:
 
     def tableau(self, player):
         print()
-        print(player.name, ':   [Hand #' + str(self.hand_number) + ']')
-        print('Bankroll: $', player.bankroll)
-        print('Bet: $', player.bet)
-        print('[Dealer shows ' + str(self.dealer.cards[1].title) + ']')
+        print('{0}:   [Hand #{1!s}]'.format(player.name, self.hand_number))
+        print('Bankroll: $' + str(player.bankroll))
+        print('Bet: $' + str(player.bet))
+        print('[Dealer shows {!s}]'.format(self.dealer.cards[1]))
 
     def resolve_players(self, deck):
         for player in self.players:
@@ -275,19 +280,8 @@ class GameState:
         while not hand.is_resolved:
             hand.card_list()
             print()
-            action = hand.action_state()
-            if action == 0:
-                break
-            elif action == 1:
-                self.action_state_1(player, hand, deck)
-            elif action == 2:
-                self.action_state_2(player, hand, deck)
-            elif action == 3:
-                self.action_state_3(player, hand, deck)
-            elif action == 4:
-                self.action_state_4(player, hand, deck)
-            else:
-                self.action_state_5(hand, deck)
+            options = self.build_options(player, hand, deck)
+            self.select_option(options)
             continue
 
         if hand.stand or hand.surrender or hand.total == 21:
@@ -298,94 +292,40 @@ class GameState:
             print('------------------------')
             time.sleep(0.5)
 
-    def action_state_1(self, player, hand, deck):
-        print('[H]it, [S]tand, [D]ouble, [SP]lit, or [SU]rrender:')
-        while True:
-            action = input('>>> ').upper()
-            if action == 'H':
-                hand.hit(deck)
-                break
-            elif action == 'S':
-                self.stand(hand)
-                break
-            elif action == 'D':
-                self.double_down(player, hand, deck)
-                break
-            elif action == 'SP':
-                self.split(player, hand, deck)
-                break
-            elif action == 'SU':
-                self.surrender(hand)
-                break
-            else:
-                continue
+    def build_options(self, player, hand, deck):
+        options = OrderedDict()
+        state = hand.action_state()
 
-    def action_state_2(self, player, hand, deck):
-        print('[H]it, [S]tand, [D]ouble, or [SU]rrender:')
-        while True:
-            action = input('>>> ').upper()
-            if action == 'H':
-                hand.hit(deck)
-                break
-            elif action == 'S':
-                self.stand(hand)
-                break
-            elif action == 'D':
-                self.double_down(player, hand, deck)
-                break
-            elif action == 'SU':
-                self.surrender(hand)
-                break
-            else:
-                continue
+        options['H'] = {'desc': '[H]it', 'method': hand.hit, 'params': [deck]}
+        options['S'] = {'desc': '[S]tand', 'method': self.stand, 'params': [hand]}
 
-    def action_state_3(self, player, hand, deck):
-        print('[H]it, [S]tand, [D]ouble, or [SP]lit:')
-        while True:
-            action = input('>>> ').upper()
-            if action == 'H':
-                hand.hit(deck)
-                break
-            elif action == 'S':
-                self.stand(hand)
-                break
-            elif action == 'D':
-                self.double_down(player, hand, deck)
-                break
-            elif action == 'SP':
-                self.split(player, hand, deck)
-                break
-            else:
-                continue
+        if state < 5:
+            options['D'] = {'desc': '[D]ouble',
+                            'method': self.double_down,
+                            'params': [player, hand, deck]}
+        if state in [1, 3]:
+            options['SP'] = {'desc': '[SP]lit',
+                             'method': self.split,
+                             'params': [player, hand, deck]}
+        if state < 3:
+            options['SU'] = {'desc': '[SU]rrender',
+                             'method': self.surrender,
+                             'params': [player, hand, deck]}
 
-    def action_state_4(self, player, hand, deck):
-        print('[H]it, [S]tand, or [D]ouble:')
-        while True:
-            action = input('>>> ').upper()
-            if action == 'H':
-                hand.hit(deck)
-                break
-            elif action == 'S':
-                self.stand(hand)
-                break
-            elif action == 'D':
-                self.double_down(player, hand, deck)
-                break
-            else:
-                continue
+        return options
 
-    def action_state_5(self, hand, deck):
-        print('[H]it or [S]tand:')
+    def select_option(self, options):
+        prompt = 'Select: {}'.format(', '.join(o['desc'] for o in options.values()))
+        print(prompt)
+        action = ''
         while True:
             action = input('>>> ').upper()
-            if action == 'H':
-                hand.hit(deck)
-                break
-            elif action == 'S':
-                self.stand(hand)
-                break
-            else:
+            if action not in options:
                 continue
+            else:
+                break
+
+        return options[action]['method'](*options[action]['params'])
 
     def surrender(self, hand):
         hand.is_resolved = True
@@ -607,7 +547,7 @@ class Game:
             print('Player', (i + 1))
             print('Enter name:')
             name = input('>>> ')
-            print('Enter bankroll (Min. $' + str(self.min_bet) + '):')
+            print('Enter bankroll (Min. ${!s}):'.format(self.min_bet))
             bankroll = float(input('>>> $'))
             print()
             g.players.append(Player(name, bankroll))
