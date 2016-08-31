@@ -281,6 +281,8 @@ class GameState:
             hand.card_list()
             print()
             options = self.build_options(player, hand, deck)
+            if not options:
+                break
             self.select_option(options)
             continue
 
@@ -295,6 +297,9 @@ class GameState:
     def build_options(self, player, hand, deck):
         options = OrderedDict()
         state = hand.action_state()
+
+        if state == 0:
+            return
 
         options['H'] = {'desc': '[H]it', 'method': hand.hit, 'params': [deck]}
         options['S'] = {'desc': '[S]tand', 'method': self.stand, 'params': [hand]}
