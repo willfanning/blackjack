@@ -5,32 +5,21 @@ from tabulate import tabulate
 
 
 class Card:
-    def __init__(self, value, rank, suit):
-        self.value = value
+    def __init__(self, rank, suit):
         self.rank = rank
         self.suit = suit
         self.title = rank + ' ' + suit
 
+    @property
+    def value(self):
+        if self.rank.isdigit():
+            return int(self.rank)
+        if self.rank in ['J', 'Q', 'K']:
+            return 10
+        return 11
+
     def __str__(self):
         return '{} {}'.format(self.rank, self.suit)
-
-
-class Deck:
-    RANKS = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
-    SUITS = ["\u2764", "\u2666", "\u2660", "\u2663"]
-    VALUES = [2, 3, 4, 5, 6, 7, 8, 9, 10, 10, 10, 10, 11]
-    NUM_DECKS = 6
-
-    @classmethod
-    def new_deck(cls):
-        """Create one shuffled deck per game, pop off cards as needed"""
-        deck = []
-        for suit in Deck.SUITS:
-            for value, rank in zip(Deck.VALUES, Deck.RANKS):
-                deck.append(Card(value, rank, suit))
-        deck *= Deck.NUM_DECKS
-        random.shuffle(deck)
-        return deck
 
 
 class Hand:
@@ -55,13 +44,11 @@ class Hand:
             self.is_resolved = True
 
     def update(self):
-        """Recalculate hand total, soften aces, check for bust"""
         self.total = 0
         for card in self.cards:
             self.total += card.value
         for card in self.cards:
             if self.total > 21 and card.value == 11:
-                card.value = 1
                 self.total -= 10
         self.check_bust()
 
@@ -77,47 +64,6 @@ class Hand:
         else:
             return False
 
-    def action_state(self):
-        """Additional actions available to a player based on their holdings
-        If hand not resolved, hit and stand always available. Return int:
-            0 - none, hand resolved
-            1 - split, surrender, double
-            2 - surrender, double
-            3 - (prev. split) re-split, double
-            4 - (prev. split) double
-            5 - none
-
-            Note extra consideration for [A, A] hands as update() alters A value,
-            but hand can still be split
-            """
-        if self.total == 21:
-            if len(self.cards) == 2:
-                print("Blackjack!")
-                self.blackjack = True
-                self.is_resolved = True
-                return 0
-            else:
-                print("Twenty-one!")
-                self.is_resolved = True
-                return 0
-        if len(self.cards) == 2:
-            if not self.split:
-                if self.cards[0].rank == 'A' and self.cards[1].rank == 'A':
-                    return 1
-                if self.cards[0].value == self.cards[1].value:
-                    return 1
-                else:
-                    return 2
-            else:
-                if self.cards[0].rank == 'A' and self.cards[1].rank == 'A':
-                    return 3
-                if self.cards[0].value == self.cards[1].value:
-                    return 3
-                else:
-                    return 4
-        else:
-            return 5
-
     def card_list(self):
         """Print out formatted hand for game use"""
         self.update()
@@ -129,14 +75,6 @@ class Hand:
         print('Total:', self.total)
         if self.bust:
             print('     (BUST)')
-
-    def hit(self, deck):
-        card = deck.pop()
-        self.cards.append(card)
-        time.sleep(0.33)
-        self.update()
-        print()
-        print('--> []')
 
 
 class Player:
@@ -153,20 +91,19 @@ class GameState:
         self.players = []
         self.hand_number = 1
         self.dealer = None
+        self.deck = None
 
     def run_game(self):
         """Play through one hand around the table"""
         self.place_bets()
-
-        deck = Deck.new_deck()
-        self.deal_cards(deck)
+        self.deal_cards()
 
         if self.dealer.ace_up():
             self.offer_insurance()
             self.check_hole_card()
 
-        self.resolve_players(deck)
-        self.resolve_dealer(deck)
+        self.resolve_players()
+        self.resolve_dealer()
         self.table()
 
         print(' - NEW HAND - ')
@@ -198,15 +135,27 @@ class GameState:
             player.bankroll -= player.bet
             print()
 
-    def deal_cards(self, deck):
+    def deal_cards(self):
+        ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
+        suits = ["\u2764", "\u2666", "\u2660", "\u2663"]
+        num_decks = 6
+        deck = []
+        for suit in suits:
+            for rank in ranks:
+                deck += [Card(rank, suit)]
+        deck *= num_decks
+        random.shuffle(deck)
+        self.deck = deck
+
         for player in self.players:
             hand = Hand()
-            hand.hit(deck)
-            hand.hit(deck)
+            self.hit(hand)
+            self.hit(hand)
             player.hands.append(hand)
+
         self.dealer = Hand()
-        self.dealer.hit(deck)
-        self.dealer.hit(deck)
+        self.hit(self.dealer)
+        self.hit(self.dealer)
 
     def offer_insurance(self):
         for player in self.players:
@@ -267,23 +216,23 @@ class GameState:
         print('Bet: $' + str(player.bet))
         print('[Dealer shows {!s}]'.format(self.dealer.cards[1]))
 
-    def resolve_players(self, deck):
+    def resolve_players(self):
         for player in self.players:
             for hand in player.hands:
                 hand.hand_bet = player.bet
                 if self.dealer.blackjack:
                     return
-                self.resolve_player_hand(player, hand, deck)
+                self.resolve_player_hand(player, hand)
 
-    def resolve_player_hand(self, player, hand, deck):
+    def resolve_player_hand(self, player, hand):
         self.tableau(player)
         while not hand.is_resolved:
             hand.card_list()
             print()
-            options = self.build_options(player, hand, deck)
+            options = self.build_options(hand)
             if not options:
                 break
-            self.select_option(options)
+            self.select_option(options, hand, player)
             continue
 
         if hand.stand or hand.surrender or hand.total == 21:
@@ -294,32 +243,35 @@ class GameState:
             print('------------------------')
             time.sleep(0.5)
 
-    def build_options(self, player, hand, deck):
+    def build_options(self, hand):
+        hand.update()
+
+        if hand.total == 21:
+            if len(hand.cards) == 2:
+                print("Blackjack!")
+                hand.blackjack = True
+                hand.is_resolved = True
+                return
+            else:
+                print("Twenty-one!")
+                hand.is_resolved = True
+                return
+
         options = OrderedDict()
-        state = hand.action_state()
 
-        if state == 0:
-            return
+        options['H'] = {'desc': '[H]it', 'method': self.hit}
+        options['S'] = {'desc': '[S]tand', 'method': self.stand}
 
-        options['H'] = {'desc': '[H]it', 'method': hand.hit, 'params': [deck]}
-        options['S'] = {'desc': '[S]tand', 'method': self.stand, 'params': [hand]}
-
-        if state < 5:
-            options['D'] = {'desc': '[D]ouble',
-                            'method': self.double_down,
-                            'params': [player, hand, deck]}
-        if state in [1, 3]:
-            options['SP'] = {'desc': '[SP]lit',
-                             'method': self.split,
-                             'params': [player, hand, deck]}
-        if state < 3:
-            options['SU'] = {'desc': '[SU]rrender',
-                             'method': self.surrender,
-                             'params': [player, hand, deck]}
+        if len(hand.cards) == 2:
+            options['D'] = {'desc': '[D]ouble', 'method': self.double_down}
+            if hand.cards[0].value == hand.cards[1].value:
+                options['SP'] = {'desc': '[SP]lit', 'method': self.split}
+            if not hand.split:
+                options['SU'] = {'desc': '[SU]rrender', 'method': self.surrender}
 
         return options
 
-    def select_option(self, options):
+    def select_option(self, options, hand, player):
         prompt = 'Select: {}'.format(', '.join(o['desc'] for o in options.values()))
         print(prompt)
         action = ''
@@ -330,21 +282,29 @@ class GameState:
             else:
                 break
 
-        return options[action]['method'](*options[action]['params'])
+        return options[action]['method'](*[hand, player])
 
-    def surrender(self, hand):
+    def hit(self, hand, *a):
+        card = self.deck.pop()
+        hand.cards.append(card)
+        time.sleep(0.33)
+        hand.update()
+        print()
+        print('--> []')
+
+    def surrender(self, hand, *a):
         hand.is_resolved = True
         hand.surrender = True
         print()
         print('Surrender')
 
-    def stand(self, hand):
+    def stand(self, hand, *a):
         hand.is_resolved = True
         hand.stand = True
         print()
         print('Stand on', hand.total)
 
-    def double_down(self, player, hand, deck):
+    def double_down(self, hand, player):
         print()
         if hand.hand_bet > player.bankroll:
             print('Not enough $ to double down')
@@ -355,18 +315,15 @@ class GameState:
         hand.is_resolved = True
         player.bankroll -= player.bet
         hand.hand_bet *= 2
-        hand.hit(deck)
+        self.hit(hand)
         hand.card_list()
 
-    def split(self, player, hand, deck):
+    def split(self, hand, player):
         print()
         if hand.hand_bet > player.bankroll:
             print('Not enough $ to split')
             print('Enter a different action')
             return
-        if hand.cards[0].rank == 'A' and hand.cards[1].rank == 'A':
-            hand.cards[0].value = 11
-            hand.cards[1].value = 11
         player.bankroll -= player.bet
         new_hand = Hand()
         hand.split = True
@@ -374,8 +331,8 @@ class GameState:
         split_card = hand.cards.pop()
         print('--> ' + split_card.title + ' to new hand')
         new_hand.cards.append(split_card)
-        hand.hit(deck)
-        new_hand.hit(deck)
+        self.hit(hand)
+        self.hit(new_hand)
         player.hands.append(new_hand)
         print()
         print('Split')
@@ -396,7 +353,7 @@ class GameState:
         else:
             return False
 
-    def resolve_dealer(self, deck):
+    def resolve_dealer(self):
         print()
         if self.need_not_resolve():
             return
@@ -404,12 +361,12 @@ class GameState:
         while not self.dealer.is_resolved:
             if self.dealer.total < 17:
                 self.dealer.card_list()
-                self.dealer.hit(deck)
+                self.hit(self.dealer)
                 continue
             elif self.dealer.total == 17:
                 if self.dealer.cards[0].value == 11 or self.dealer.cards[1].value == 11:
                     self.dealer.card_list()
-                    self.dealer.hit(deck)
+                    self.hit(self.dealer)
                     continue
                 else:
                     break
@@ -475,12 +432,13 @@ class GameState:
                 self.hand_result(player, hand)
                 table.append([player.name, hand.total, hand.result,
                               hand.hand_bet, hand.payout, player.bankroll])
-        print(tabulate(table, headers=headers, numalign='center',
-                       stralign='center', floatfmt='0.2f'))
+        print(tabulate(table, headers=headers, numalign='center', stralign='center', floatfmt='0.2f'))
         print()
 
     def new_game_options(self):
         self.dealer = None
+        self.deck = None
+
         for player in self.players[:]:
             player.hands.clear()
             if player.bankroll < Game.min_bet:
@@ -490,7 +448,7 @@ class GameState:
                 self.players.remove(player)
                 break
             print(player.name + ':')
-            print('[R]ebet, [C]hange bet, or [Q]uit:')
+            print('Select: [R]ebet, [C]hange bet, or [Q]uit:')
             while True:
                 action = input('>>> ').upper()
                 if action == 'R' and player.bet > player.bankroll:
@@ -515,6 +473,7 @@ class Game:
     min_bet = 5
 
     def __init__(self):
+        print('#########################################################')
         print()
         print('House rules:')
         print()
@@ -526,6 +485,7 @@ class Game:
         print('- A split ace and ten-value card does not make Blackjack')
         print('- Surrender any first two cards')
         print()
+        print('#########################################################')
 
     def new_game(self):
         g = GameState()
