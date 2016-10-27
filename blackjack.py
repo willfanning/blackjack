@@ -38,34 +38,27 @@ class Hand:
         self.bust = False
         self.blackjack = False
 
+    def get_total(self):
+        self.total = 0
+        for card in self.cards:
+            self.total += card.value
+
     def check_bust(self):
         if self.total > 21:
             self.bust = True
             self.is_resolved = True
 
     def update(self):
-        self.total = 0
-        for card in self.cards:
-            self.total += card.value
+        self.get_total()
         for card in self.cards:
             if self.total > 21 and card.value == 11:
                 self.total -= 10
         self.check_bust()
 
     def ace_up(self):
-        return self.cards[1].value == 11
-
-    def has_blackjack(self):
-        self.update()
-        if self.total == 21:
-            self.blackjack = True
-            self.is_resolved = True
-            return True
-        else:
-            return False
+        return self.cards[1].rank == 'A'
 
     def card_list(self):
-        """Print out formatted hand for game use"""
         self.update()
         time.sleep(0.5)
         print()
@@ -104,7 +97,7 @@ class GameState:
 
         self.resolve_players()
         self.resolve_dealer()
-        self.table()
+        self.results_table()
 
         print(' - NEW HAND - ')
         print()
@@ -138,12 +131,12 @@ class GameState:
     def deal_cards(self):
         ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
         suits = ["\u2764", "\u2666", "\u2660", "\u2663"]
-        num_decks = 6
+        NUM_DECKS = 6
         deck = []
         for suit in suits:
             for rank in ranks:
                 deck += [Card(rank, suit)]
-        deck *= num_decks
+        deck *= NUM_DECKS
         random.shuffle(deck)
         self.deck = deck
 
@@ -166,8 +159,7 @@ class GameState:
             if player.bankroll < player.bet * 0.5:
                 print('Not enough $ to buy insurance')
                 continue
-            if hand.has_blackjack():
-                print('You have blackjack!')
+            if hand.total == 21:
                 print('Take even money? Enter [Y]es or [N]o:')
                 while True:
                     even_money = input('>>> ').upper()
@@ -199,11 +191,10 @@ class GameState:
     def check_hole_card(self):
         print()
         print('Dealer checking hole card...')
-        time.sleep(1)
-        if self.dealer.has_blackjack():
-            print()
-            print('Dealer reveals blackjack')
-            self.dealer.card_list()
+        time.sleep(2)
+        self.dealer.update()
+        if self.dealer.total == 21:
+            print('Dealer reveals Blackjack')
             for player in self.players:
                 player.hands[0].is_resolved = True
         else:
@@ -211,10 +202,10 @@ class GameState:
 
     def tableau(self, player):
         print()
-        print('{0}:   [Hand #{1!s}]'.format(player.name, self.hand_number))
-        print('Bankroll: $' + str(player.bankroll))
-        print('Bet: $' + str(player.bet))
-        print('[Dealer shows {!s}]'.format(self.dealer.cards[1]))
+        print('{}:   [Hand #{}]'.format(player.name, self.hand_number))
+        print('Bankroll: ${}'.format(player.bankroll))
+        print('Bet: ${}'.format(player.bet))
+        print('[Dealer shows {}]'.format(self.dealer.cards[1]))
 
     def resolve_players(self):
         for player in self.players:
@@ -235,7 +226,7 @@ class GameState:
             self.select_option(options, hand, player)
             continue
 
-        if hand.stand or hand.surrender or hand.total == 21:
+        if hand.bust or hand.stand or hand.surrender or hand.total == 21:
             print('------------------------')
             time.sleep(0.5)
         else:
@@ -248,47 +239,42 @@ class GameState:
 
         if hand.total == 21:
             if len(hand.cards) == 2:
-                print("Blackjack!")
                 hand.blackjack = True
                 hand.is_resolved = True
-                return
+                print('Blackjack!')
             else:
-                print("Twenty-one!")
                 hand.is_resolved = True
-                return
+                print('Twenty-one!')
+            return
 
-        options = OrderedDict()
+        while not hand.is_resolved:
+            options = OrderedDict()
+            options['H'] = {'desc': '[H]it', 'method': self.hit}
+            options['S'] = {'desc': '[S]tand', 'method': self.stand}
 
-        options['H'] = {'desc': '[H]it', 'method': self.hit}
-        options['S'] = {'desc': '[S]tand', 'method': self.stand}
+            if len(hand.cards) == 2:
+                options['D'] = {'desc': '[D]ouble', 'method': self.double_down}
+                if hand.cards[0].value == hand.cards[1].value:
+                    options['SP'] = {'desc': '[SP]lit', 'method': self.split}
+                if not hand.split:
+                    options['SU'] = {'desc': '[SU]rrender', 'method': self.surrender}
 
-        if len(hand.cards) == 2:
-            options['D'] = {'desc': '[D]ouble', 'method': self.double_down}
-            if hand.cards[0].value == hand.cards[1].value:
-                options['SP'] = {'desc': '[SP]lit', 'method': self.split}
-            if not hand.split:
-                options['SU'] = {'desc': '[SU]rrender', 'method': self.surrender}
-
-        return options
+            return options
 
     def select_option(self, options, hand, player):
         prompt = 'Select: {}'.format(', '.join(o['desc'] for o in options.values()))
         print(prompt)
-        action = ''
         while True:
             action = input('>>> ').upper()
             if action not in options:
                 continue
             else:
-                break
-
-        return options[action]['method'](*[hand, player])
+                return options[action]['method'](*[hand, player])
 
     def hit(self, hand, *a):
         card = self.deck.pop()
         hand.cards.append(card)
         time.sleep(0.33)
-        hand.update()
         print()
         print('--> []')
 
@@ -359,18 +345,19 @@ class GameState:
             return
         print('Resolving Dealer Hand:')
         while not self.dealer.is_resolved:
+            self.dealer.update()
             if self.dealer.total < 17:
                 self.dealer.card_list()
                 self.hit(self.dealer)
                 continue
-            elif self.dealer.total == 17:
+            if self.dealer.total == 17:
                 if self.dealer.cards[0].value == 11 or self.dealer.cards[1].value == 11:
                     self.dealer.card_list()
                     self.hit(self.dealer)
-                    continue
                 else:
                     break
             elif 17 < self.dealer.total <= 21:
+                self.dealer.is_resolved = True
                 break
 
         self.dealer.card_list()
@@ -424,7 +411,7 @@ class GameState:
         else:
             hand.result = 'LOSS'
 
-    def table(self):
+    def results_table(self):
         table = []
         headers = ['PLAYER', 'TOTAL', 'RESULT', 'BET', 'PAYOUT', 'BANKROLL']
         for player in self.players:
@@ -512,7 +499,7 @@ class Game:
             print('Player', (i + 1))
             print('Enter name:')
             name = input('>>> ')
-            print('Enter bankroll (Min. ${!s}):'.format(self.min_bet))
+            print('Enter bankroll (Min. ${}):'.format(self.min_bet))
             bankroll = float(input('>>> $'))
             print()
             g.players.append(Player(name, bankroll))
