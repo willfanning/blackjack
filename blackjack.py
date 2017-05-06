@@ -9,14 +9,7 @@ class Card:
         self.rank = rank
         self.suit = suit
         self.title = rank + ' ' + suit
-
-    @property
-    def value(self):
-        if self.rank.isdigit():
-            return int(self.rank)
-        if self.rank in ['J', 'Q', 'K']:
-            return 10
-        return 11
+        self.value = int(rank) if rank.isdigit() else 10 if rank in ['J', 'Q', 'K'] else 11
 
     def __str__(self):
         return '{} {}'.format(self.rank, self.suit)
@@ -38,10 +31,9 @@ class Hand:
         self.bust = False
         self.blackjack = False
 
-    def get_total(self):
-        self.total = 0
-        for card in self.cards:
-            self.total += card.value
+    def update_total(self):
+        self.total = sum(card.value for card in self.cards)
+        return self.total
 
     def check_bust(self):
         if self.total > 21:
@@ -49,9 +41,11 @@ class Hand:
             self.is_resolved = True
 
     def update(self):
-        self.get_total()
+        self.update_total()
+        # adjust total for Aces when total > 21
         for card in self.cards:
             if self.total > 21 and card.value == 11:
+                card.value -= 10
                 self.total -= 10
         self.check_bust()
 
@@ -110,7 +104,7 @@ class GameState:
             if player.change_bet:
                 player.bet = 0
                 print(player.name)
-                print('Place your bet (Min. ${!s} / Max. ${!s}):'.format(Game.min_bet, player.bankroll))
+                print('Place your bet (Min. ${0:.2f} / Max. ${1:.2f}):'.format(Game.min_bet, player.bankroll))
                 while not player.bet >= Game.min_bet and player.bet <= player.bankroll:
                     bet = float(input('>>> $'))
                     if bet < Game.min_bet:
@@ -131,12 +125,12 @@ class GameState:
     def deal_cards(self):
         ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
         suits = ["\u2764", "\u2666", "\u2660", "\u2663"]
-        NUM_DECKS = 6
+        num_decks = 6
         deck = []
         for suit in suits:
             for rank in ranks:
-                deck += [Card(rank, suit)]
-        deck *= NUM_DECKS
+                deck.append(Card(rank, suit))
+        deck *= num_decks
         random.shuffle(deck)
         self.deck = deck
 
@@ -170,8 +164,7 @@ class GameState:
                     elif even_money == 'N':
                         print('No insurance')
                         break
-                    else:
-                        continue
+
             else:
                 print('Insurance? Enter [Y]es or [N]o:')
                 while True:
@@ -185,25 +178,21 @@ class GameState:
                     elif insurance == 'N':
                         print('No insurance')
                         break
-                    else:
-                        continue
 
     def check_hole_card(self):
         print()
         print('Dealer checking hole card...')
-        time.sleep(2)
+        time.sleep(1.5)
         self.dealer.update()
         if self.dealer.total == 21:
             print('Dealer reveals Blackjack')
             for player in self.players:
                 player.hands[0].is_resolved = True
-        else:
-            pass
 
     def tableau(self, player):
         print()
         print('{}:   [Hand #{}]'.format(player.name, self.hand_number))
-        print('Bankroll: ${}'.format(player.bankroll))
+        print('Bankroll: ${0:.2f}'.format(player.bankroll))
         print('Bet: ${}'.format(player.bet))
         print('[Dealer shows {}]'.format(self.dealer.cards[1]))
 
@@ -217,14 +206,15 @@ class GameState:
 
     def resolve_player_hand(self, player, hand):
         self.tableau(player)
+
         while not hand.is_resolved:
             hand.card_list()
             print()
+
             options = self.build_options(hand)
             if not options:
                 break
             self.select_option(options, hand, player)
-            continue
 
         if hand.bust or hand.stand or hand.surrender or hand.total == 21:
             print('------------------------')
@@ -238,14 +228,13 @@ class GameState:
         hand.update()
 
         if hand.total == 21:
+            hand.is_resolved = True
             if len(hand.cards) == 2:
                 hand.blackjack = True
-                hand.is_resolved = True
                 print('Blackjack!')
             else:
-                hand.is_resolved = True
                 print('Twenty-one!')
-            return
+            return None
 
         while not hand.is_resolved:
             options = OrderedDict()
@@ -254,7 +243,8 @@ class GameState:
 
             if len(hand.cards) == 2:
                 options['D'] = {'desc': '[D]ouble', 'method': self.double_down}
-                if hand.cards[0].value == hand.cards[1].value:
+                if hand.cards[0].value == hand.cards[1].value or (
+                        hand.cards[0].rank == 'A' and hand.cards[1].rank == 'A'):
                     options['SP'] = {'desc': '[SP]lit', 'method': self.split}
                 if not hand.split:
                     options['SU'] = {'desc': '[SU]rrender', 'method': self.surrender}
@@ -266,10 +256,9 @@ class GameState:
         print(prompt)
         while True:
             action = input('>>> ').upper()
-            if action not in options:
-                continue
-            else:
-                return options[action]['method'](*[hand, player])
+            if action in options:
+                break
+        return options[action]['method'](*[hand, player])
 
     def hit(self, hand, *a):
         card = self.deck.pop()
@@ -334,10 +323,7 @@ class GameState:
                 player_hands += 1
                 if hand.bust or hand.surrender or hand.blackjack:
                     player_out += 1
-        if player_out == player_hands:
-            return True
-        else:
-            return False
+        return player_out == player_hands
 
     def resolve_dealer(self):
         print()
@@ -435,7 +421,7 @@ class GameState:
                 self.players.remove(player)
                 break
             print(player.name + ':')
-            print('Select: [R]ebet, [C]hange bet, or [Q]uit:')
+            print('Select: [R]ebet (${0:.2f}), [C]hange bet, or [Q]uit:'.format(player.bet))
             while True:
                 action = input('>>> ').upper()
                 if action == 'R' and player.bet > player.bankroll:
@@ -443,15 +429,15 @@ class GameState:
                     print('Bet too large for current bankroll.')
                 if action == 'R':
                     player.change_bet = False
-                    print('Rebet')
+                    print('REBET')
                     break
                 if action == 'C':
                     player.change_bet = True
-                    print('Change bet')
+                    print('CHANGE BET')
                     break
                 if action == 'Q':
                     self.players.remove(player)
-                    print('Goodbye')
+                    print('GOODBYE')
                     break
             print()
 
@@ -478,36 +464,42 @@ class Game:
         g = GameState()
         print('Welcome to Blackjack!')
         print()
+
         print('Enter [B] to begin:')
         while True:
             enter_b = input('>>> ').upper()
             if enter_b == 'B':
                 break
-            else:
-                continue
         print()
+
         print('Enter the number of players:')
-        num_players = 0
         while True:
-            num_players = int(input('>>> '))
-            if num_players > 0:
+            num_players = input('>>> ')
+            if num_players.isdigit() and int(num_players) > 0:
                 break
-            else:
-                continue
         print()
-        for i in range(num_players):
+
+        for i in range(int(num_players)):
             print('Player', (i + 1))
+
             print('Enter name:')
             name = input('>>> ')
-            print('Enter bankroll (Min. ${}):'.format(self.min_bet))
-            bankroll = float(input('>>> $'))
+
+            print('Enter bankroll (Min. ${0:.2f}):'.format(self.min_bet))
+            while True:
+                bankroll = input('>>> $')
+                if bankroll.isdigit() and float(bankroll) > self.min_bet:
+                    break
             print()
-            g.players.append(Player(name, bankroll))
+            # add new player to game
+            g.players.append(Player(name, float(bankroll)))
+
         return g
 
 if __name__ == '__main__':
-    g = Game()
-    gs = g.new_game()
+    # initialize game state
+    gs = Game().new_game()
+    # run while there are still players
     while len(gs.players) > 0:
         gs.run_game()
     print('Thanks for playing')
