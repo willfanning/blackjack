@@ -123,8 +123,8 @@ class GameState:
             print()
 
     def deal_cards(self):
-        ranks = ["2", "3", "4", "5", "6", "7", "8", "9", "10", "J", "Q", "K", "A"]
-        suits = ["\u2764", "\u2666", "\u2660", "\u2663"]
+        ranks = ['2', '3', '4', '5', '6', '7', '8', '9', '10', 'J', 'Q', 'K', 'A']
+        suits = ['\u2764', '\u2666', '\u2660', '\u2663']
         num_decks = 6
         deck = []
         for suit in suits:
@@ -381,9 +381,14 @@ class GameState:
                 player.bankroll += hand.hand_bet
 
         elif hand.blackjack:
-            hand.result = 'WIN-BJ'
-            hand.payout = hand.hand_bet * 1.5
-            player.bankroll += hand.hand_bet + hand.payout
+            if hand.is_insured:
+                hand.result = 'EVEN$'
+                hand.payout = hand.hand_bet
+                player.bankroll = hand.hand_bet + hand.payout
+            else:
+                hand.result = 'WIN-BJ'
+                hand.payout = hand.hand_bet * 1.5
+                player.bankroll += hand.hand_bet + hand.payout
 
         elif hand.total > self.dealer.total:
             hand.result = 'WIN'
